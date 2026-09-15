@@ -3,7 +3,7 @@
 MyBooks 工具箱**外部工具包**：把 Markdown 转换成 EPUB3 电子书。
 
 支持三种输入：单个/多个 `.md`、整个目录（`webkitdirectory`，保留相对路径以便内嵌同目录图片）、
-以及 `.zip`。产物 epub 不下载入库，直接回传给浏览器下载。
+以及 `.zip`。**转换后默认导入书库**，同时保留产物供下载；入库可以在界面上关掉。
 
 本仓库是独立发布单元（不是内置工具）：代码由使用者上传工具包安装，不打进 MyBooks 主仓库。
 
@@ -13,7 +13,9 @@ MyBooks 工具箱**外部工具包**：把 Markdown 转换成 EPUB3 电子书。
 tool_md_to_epub/
 ├── manifest.json            # 工具元数据（tool_id / entry_backend / api_routes ...）
 ├── .toolbuilder.json        # mytool build 配置：前端原生静态资源，无构建步骤
-├── icon.png                 # 工具图标（动态工具只认包根的 icon.png）
+├── icon.png                 # 工具图标（动态工具只认包根的 icon.png，且必须是 PNG）
+├── assets/
+│   └── icon_source.jpg      # 图标原图（make_icon.py 的输入，不打进包）
 ├── backend/
 │   ├── __init__.py          # 让 backend/ 成为包，工具内模块才能相对导入
 │   ├── tool.py              # MdToEpubTool + ConvertHandler + DownloadHandler
@@ -26,10 +28,10 @@ tool_md_to_epub/
 │   └── locales/{manifest,zh,en,zh-TW}.json
 ├── scripts/
 │   ├── build.py             # 推荐构建入口：清理字节码 → mytool build → 校验 zip 形状
-│   └── make_icon.py         # 重新生成 icon.png
+│   └── make_icon.py         # 从 assets/icon_source.jpg 生成 icon.png（1024²，中心裁方形）
 └── tests/
     ├── test_md_to_epub_core.py    # 转换引擎单测（含依赖前置检查）
-    └── test_package_layout.py     # 工具包契约守卫（manifest / 结构 / 鉴权 / i18n 键）
+    └── test_package_layout.py     # 工具包契约守卫（manifest / 结构 / 鉴权 / 入库接线 / i18n 键）
 ```
 
 ## 安装与生效
@@ -84,6 +86,9 @@ python scripts/build.py      # 推荐：清理字节码 → mytool build → 校
 
 ## 行为约定
 
+- **转换后默认导入书库**（`import_to_library` 缺省为开，界面可关）：**入库失败不会连带丢掉
+  转换结果**——接口返回 `import.failed` 并照常带回下载链接，界面同时提示失败与下载入口，不白转
+  一趟。入库归属当前操作的管理员，书库元数据取转换结果里的书名/作者（与 epub 内嵌一致）；
 - **远程图片一律移除**，绝不联网抓取（隐私 / SSRF / 离线环境），命中数量在界面提示；
 - **本地相对图片缺失或越界 → 报错**，不会静默丢图；提示改用「目录 / zip 上传」保留图片目录
   结构，或勾选「不导入图片」（此时图片替换为 alt 文本）；
@@ -98,13 +103,19 @@ python scripts/build.py      # 推荐：清理字节码 → mytool build → 校
 
 | 路由 | 方法 | 说明 |
 |---|---|---|
-| `convert` | POST | multipart：`files`（可重复）、`relative_paths`（可重复，与 files 下标对齐）、`ignore_images`、`title`、`author`；返回 `{"err": <错误码>, "msg": <中文兜底>, "data": {...}}` |
+| `convert` | POST | multipart：`files`（可重复）、`relative_paths`（可重复，与 files 下标对齐）、`ignore_images`、`import_to_library`（缺省为开）、`title`、`author`；返回 `{"err": <错误码>, "msg": <中文兜底>, "data": {...}}`；`data` 含 `imported` / `book_id` 与 `download_url` |
 | `download` | GET | `?token=<16 位 hex>&name=<文件名>`，回传 `application/epub+zip` |
 
 两个路由都是**管理员限定**。宿主在挂载外部工具路由时只包一层"工具被禁用则 404"，
 不注入任何鉴权装饰器，所以 `@js` / `@is_admin` 写在 `backend/tool.py` 里；
 `download` 返回的是文件字节流，用不了 `@js`，因此按宿主 `AdminEpubBeautifyBgRaw` 的既有做法
 显式判权 + 显式写出响应。
+
+入库调用链有个**必须踩准的点**：`import_epub()` 用 `@AsyncService.register_function` 装饰。
+宿主 `register_service` 的 `async_mode()` 恒为 True，调用会被丢进后台队列并返回 None，拿不到
+`book_id`；而完全不加装饰器时 `self.db` 还没被注入（None），会在 `import_file` 内部崩。
+只有 `register_function` 是"先 `setup(db, scoped_session)` 再同步调用"。
+`tests/test_package_layout.py` 用 AST 把这条钉住了。
 
 ## 前端
 
@@ -121,7 +132,7 @@ python scripts/build.py      # 推荐：清理字节码 → mytool build → 校
 
 ```bash
 python tests/test_md_to_epub_core.py     # 转换引擎，18 个用例
-python tests/test_package_layout.py      # 工具包契约，23 个用例
+python tests/test_package_layout.py      # 工具包契约，25 个用例
 pytest tests/                            # 一次跑完
 ```
 
@@ -131,8 +142,9 @@ zip 安全解压、宿主依赖前置检查。
 
 `test_package_layout.py` 守的是「`mytool validate` 管不到、但一旦破就会在真实安装后炸掉」的约定：
 manifest 必填字段与格式、`info()` 与 manifest 一致、`backend/__init__.py` 与 entry 模块存在、
-`icon.png` 是 PNG、**handler 的 `@js`/`@is_admin` 没被漏掉**（宿主不注入鉴权）、后端每个错误码
-都有三语文案、三语 key 集合一致且 HTML/JS 引用的 key 都存在、包内没夹带依赖副本。
+`icon.png` 是正方形 PNG、**handler 的 `@js`/`@is_admin` 没被漏掉**（宿主不注入鉴权）、
+**入库走的是 `register_function` 且默认开**（见「后端接口」里的说明）、后端每个错误码都有三语
+文案、三语 key 集合一致且 HTML/JS 引用的 key 都存在、包内没夹带依赖副本。
 
 两组测试都**不需要** MyBooks 环境与 calibre。
 

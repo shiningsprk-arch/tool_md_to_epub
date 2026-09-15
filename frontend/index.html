@@ -52,6 +52,12 @@
       </label>
       <p class="mb-text-secondary hint" data-i18n="ignoreImagesHint"></p>
 
+      <label class="mb-field" style="margin-top: 10px">
+        <input id="import-lib" type="checkbox" checked />
+        <span data-i18n="importToLibrary"></span>
+      </label>
+      <p class="mb-text-secondary hint" data-i18n="importToLibraryHint"></p>
+
       <div class="mb-row" style="margin-top: 14px">
         <div class="mb-col">
           <label class="field-label" for="title-input" data-i18n="titleLabel"></label>
@@ -80,7 +86,12 @@
           <span class="mb-chip"><span data-i18n="statImages"></span>: <b id="stat-images">0</b></span>
         </div>
         <div id="warnings" class="mb-alert mb-alert--warning" hidden></div>
-        <a id="download-link" class="mb-btn" href="#" download></a>
+        <p id="import-state" class="mb-text-secondary" hidden></p>
+        <div class="mb-row mb-row--center">
+          <a id="download-link" class="mb-btn" href="#" download></a>
+          <a id="open-book" class="mb-btn mb-btn--secondary" href="#" target="_blank" rel="noopener"
+             data-i18n="openBook" hidden></a>
+        </div>
       </div>
     </div>
   </div>

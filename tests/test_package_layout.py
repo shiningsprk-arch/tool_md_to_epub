@@ -155,7 +155,13 @@ class PackageLayoutTest(unittest.TestCase):
         icon = os.path.join(ROOT, "icon.png")
         self.assertTrue(os.path.isfile(icon), "动态工具的图标只认包根 icon.png")
         with open(icon, "rb") as f:
-            self.assertEqual(f.read(8), b"\x89PNG\r\n\x1a\n")
+            head = f.read(24)
+        self.assertEqual(head[:8], b"\x89PNG\r\n\x1a\n")
+        # 图标位是方的：直接从 IHDR 读宽高（不引 Pillow，保持本文件纯标准库）
+        width = int.from_bytes(head[16:20], "big")
+        height = int.from_bytes(head[20:24], "big")
+        self.assertEqual(width, height, "icon.png 必须是正方形（%dx%d）" % (width, height))
+        self.assertGreaterEqual(width, 256)
         # .jpg 放在包根不会被使用（宿主对动态工具只查 icon.png），留着只会误导
         self.assertFalse(os.path.isfile(os.path.join(ROOT, "icon.jpg")))
 
@@ -217,6 +223,28 @@ class BackendContractTest(unittest.TestCase):
         segment = ast.get_source_segment(self.tool_src, method) or ""
         self.assertIn("current_user", segment)
         self.assertIn("admin_user", segment)
+
+    def test_import_method_uses_register_function(self):
+        """入库必须走 register_function（同步变体）。
+
+        register_service 在当前宿主实现里 `async_mode()` 恒为 True，调用会被丢进后台队列并
+        返回 None —— 拿不到 book_id；而不加装饰器直接调 `self.db` 时它还没被注入（None），
+        会在 import_file 内部炸。只有 register_function 会先 setup(db, scoped_session) 再同步
+        调用，两者都规避。
+        """
+        cls = _class_node(self.tree, self.manifest["entry_backend"].split(".")[-1])
+        decorators = _decorator_names(_method_node(cls, "import_epub"))
+        self.assertIn("register_function", decorators)
+        self.assertNotIn("register_service", decorators)
+
+    def test_import_defaults_on_and_uses_current_user(self):
+        """默认入库（前端不传参时也入库），且入库归属当前用户。"""
+        method = _method_node(_class_node(self.tree, "ConvertHandler"), "post")
+        segment = ast.get_source_segment(self.tool_src, method) or ""
+        self.assertRegex(segment, r'get_argument\(\s*"import_to_library"\s*,\s*"1"\s*\)',
+                         "import_to_library 的缺省值应为开，否则默认行为不是入库")
+        self.assertIn("self.current_user.id", segment)
+        self.assertIn("import_epub", segment)
 
     def test_routes_are_manifest_driven(self):
         """外部工具的路由前缀由宿主拼，代码里不能写死内置时代的路径。"""

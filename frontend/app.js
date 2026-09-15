@@ -27,6 +27,7 @@
     dirInput: el('dir-input'),
     pickedDir: el('picked-dir'),
     ignoreImages: el('ignore-images'),
+    importLib: el('import-lib'),
     titleInput: el('title-input'),
     authorInput: el('author-input'),
     convertBtn: el('convert-btn'),
@@ -38,7 +39,9 @@
     statChapters: el('stat-chapters'),
     statImages: el('stat-images'),
     warnings: el('warnings'),
+    importState: el('import-state'),
     downloadLink: el('download-link'),
+    openBook: el('open-book'),
   };
 
   var state = {
@@ -125,7 +128,10 @@
     dom.result.hidden = true;
     dom.error.hidden = true;
     dom.warnings.hidden = true;
+    dom.importState.hidden = true;
     dom.downloadLink.removeAttribute('href');
+    dom.openBook.hidden = true;
+    dom.openBook.removeAttribute('href');
   }
 
   function renderResult(data) {
@@ -141,6 +147,20 @@
       dom.warnings.hidden = true;
     }
 
+    if (data.imported && data.book_id) {
+      dom.importState.textContent = i18n.t('imported', {
+        title: data.title || '',
+        id: data.book_id,
+      });
+      dom.openBook.setAttribute('href', '/book/' + data.book_id);
+      dom.openBook.hidden = false;
+    } else {
+      dom.importState.textContent = i18n.t('notImported');
+      dom.openBook.hidden = true;
+      dom.openBook.removeAttribute('href');
+    }
+    dom.importState.hidden = false;
+
     if (data.download_url) {
       dom.downloadLink.setAttribute('href', data.download_url);
     }
@@ -148,6 +168,9 @@
     dom.downloadLink.textContent = i18n.t('downloadBtn');
     dom.result.hidden = false;
   }
+
+  // 这些错误码的宿主 msg 是唯一的诊断细节（包名 / Calibre 报错），值得附在译文后面
+  var DETAIL_CODES = ['deps.missing', 'import.failed'];
 
   function errorText(rsp) {
     var code = (rsp && rsp.err) || 'unknown';
@@ -157,8 +180,7 @@
     if (text === key) {
       return msg || code;   // 没有对应文案：用后端消息兜底（可能是中文）
     }
-    // deps.missing 的 msg 是"宿主缺少依赖：<发行包名>"，包名语言无关，附上更便于排查
-    return code === 'deps.missing' && msg ? text + ' — ' + msg : text;
+    return DETAIL_CODES.indexOf(code) !== -1 && msg ? text + ' — ' + msg : text;
   }
 
   function renderError(rsp) {
@@ -181,6 +203,7 @@
       }
     });
     formData.append('ignore_images', dom.ignoreImages.checked ? '1' : '0');
+    formData.append('import_to_library', dom.importLib.checked ? '1' : '0');
     if (dom.titleInput.value.trim()) {
       formData.append('title', dom.titleInput.value.trim());
     }
@@ -222,13 +245,16 @@
 
     postConvert(buildFormData())
       .then(function (rsp) {
-        if (rsp && rsp.err === 'ok') {
-          renderResult(rsp.data || {});
-          if (bridge && bridge.notify) {
-            bridge.notify(i18n.t('success'), 'success');
-          }
-        } else {
+        // 入库失败时后端照样带回 data（含下载链接）：结果区照常渲染，另加一条失败提示
+        if (rsp && rsp.data) {
+          renderResult(rsp.data);
+        }
+        if (!rsp || rsp.err !== 'ok') {
           renderError(rsp || { err: 'unknown' });
+          return;
+        }
+        if (bridge && bridge.notify) {
+          bridge.notify(i18n.t('success'), 'success');
         }
       })
       .catch(function (err) {

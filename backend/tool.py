@@ -16,7 +16,7 @@ manifest.json 里 `entry_backend` 指向本模块的 `MdToEpubTool`，`api_route
    本模块不能自己写死完整路由。
 
 转换逻辑是纯函数，放在同目录的 `md_to_epub_lib`（不依赖 webserver / calibre，可单测）；
-本模块只负责工作目录、请求解析、线程池调度与产物回传。
+本模块只负责工作目录、请求解析、线程池调度、产物入库与回传。
 """
 import functools
 import logging
@@ -32,6 +32,7 @@ import tornado.ioloop
 
 from webserver.handlers.base import BaseHandler, is_admin, js
 from webserver.i18n import _
+from webserver.services import AsyncService
 from webserver.toolbox.base_tool import BaseTool
 
 from . import md_to_epub_lib
@@ -62,7 +63,7 @@ class MdToEpubTool(BaseTool):
             "tool_id": "md_to_epub",
             "name": "Markdown转EPUB",
             "description": "将 Markdown（支持同目录图片、目录或 zip 上传）转换为 EPUB3 电子书",
-            "revision": "1.0.0",
+            "revision": "1.1.0",
             "author": "黏菌",
             "publish_date": "2026-09-15",
             "repo_url": "https://github.com/shiningsprk-arch/tool_md_to_epub",
@@ -106,12 +107,35 @@ class MdToEpubTool(BaseTool):
             f.write(result.pop("epub"))
         return result
 
+    # ---------------------------------------------------------------- 入库
+
+    @AsyncService.register_function
+    def import_epub(self, user_id: int, epub_path: str, title: str, author: str) -> int:
+        """把产物 epub 导入书库，返回 Calibre book_id。
+
+        必须用 `register_function`（同步变体）：它只做 `setup(db, scoped_session)` 注入后直接
+        调用。不能用 `register_service`——它当前实现里 `async_mode()` 恒为 True，调用会被丢进
+        后台队列并返回 None，拿不到 book_id；也不能绕开装饰器直接调 `self.db`，未注入时它是
+        None（会在 `import_file` 内部炸）。
+
+        `delete_after_import=False`：产物仍要供下载链接使用，工作目录交给 24h 惰性 GC 回收。
+        入库落的是 Calibre 书库副本，删不删源文件都不影响已入库的书。
+        """
+        return self.api.calibre.import_file(
+            user_id, epub_path, title or "", [author] if author else [],
+            delete_after_import=False,
+        )
+
 
 class ConvertHandler(BaseHandler):
-    """POST /api/toolbox/tool/md_to_epub/convert —— multipart 上传并转换。
+    """POST /api/toolbox/tool/md_to_epub/convert —— multipart 上传、转换，并按开关入库。
 
-    返回 `{"err": <错误码>, "msg": <中文兜底>}`；前端用错误码查自己的三语文案，
-    查不到时才回落到 msg。渲染线程池里跑，避免阻塞 IOLoop。
+    默认入库（`import_to_library` 缺省视为开）；入库失败与转换失败是两回事——转换成功但入库
+    失败时返回 `{"err": "import.failed", "msg": <宿主原因>, "data": {...}}`，`data` 照常带上
+    下载链接，前端既提示失败也保留下载入口，不白转一趟。
+
+    转换与入库都在线程池里跑（Calibre 入库同步且可能较慢），避免阻塞 IOLoop。
+    返回 `{"err": <错误码>, "msg": <中文兜底>}`；前端用错误码查自己的三语文案。
     """
 
     @js
@@ -122,10 +146,12 @@ class ConvertHandler(BaseHandler):
             return {"err": "params.missing", "msg": _("未选择文件")}
         rel_paths = self.get_arguments("relative_paths")
         ignore_images = self.get_argument("ignore_images", "0").lower() in ("1", "true", "yes")
+        import_to_library = self.get_argument("import_to_library", "1").lower() in ("1", "true", "yes")
         title = (self.get_argument("title", "") or "").strip()
         author = (self.get_argument("author", "") or "").strip()
 
         tool = MdToEpubTool()
+        loop = tornado.ioloop.IOLoop.current()
         token, work_dir = tool.new_work_dir()
         staging = os.path.join(work_dir, "src")
         out_path = os.path.join(work_dir, "out.epub")
@@ -135,7 +161,6 @@ class ConvertHandler(BaseHandler):
             if not md_to_epub_lib.find_markdown_files(staging):
                 raise MarkdownConvertError(
                     "no_markdown", _("未找到 Markdown 文件（.md / .markdown）"))
-            loop = tornado.ioloop.IOLoop.current()
             result = await loop.run_in_executor(
                 None, functools.partial(
                     tool.build_epub, staging, out_path, ignore_images, title, author))
@@ -149,20 +174,32 @@ class ConvertHandler(BaseHandler):
             shutil.rmtree(staging, ignore_errors=True)
 
         filename = "%s.epub" % (title or result.get("title") or "book")
-        return {
-            "err": "ok",
-            "msg": _("转换成功"),
-            "data": {
-                "token": token,
-                "filename": filename,
-                "download_url": "%s/download?token=%s&name=%s" % (
-                    _API_ROOT, token, tornado.escape.url_escape(filename)),
-                "title": result.get("title"),
-                "image_count": result.get("image_count", 0),
-                "chapter_count": result.get("chapter_count", 0),
-                "warnings": result.get("warnings", []),
-            },
+        data = {
+            "token": token,
+            "filename": filename,
+            "download_url": "%s/download?token=%s&name=%s" % (
+                _API_ROOT, token, tornado.escape.url_escape(filename)),
+            "title": result.get("title"),
+            "image_count": result.get("image_count", 0),
+            "chapter_count": result.get("chapter_count", 0),
+            "warnings": result.get("warnings", []),
+            "imported": False,
+            "book_id": None,
         }
+
+        if import_to_library:
+            # 用转换结果里的书名/作者（而不是表单原始值），保证书库元数据与 epub 内嵌一致
+            try:
+                data["book_id"] = await loop.run_in_executor(
+                    None, functools.partial(
+                        tool.import_epub, self.current_user.id, out_path,
+                        result.get("title") or "", result.get("author") or ""))
+                data["imported"] = True
+            except Exception as err:
+                logging.warning("[MdToEpubTool] 入库失败: %s", err)
+                return {"err": "import.failed", "msg": str(err), "data": data}
+
+        return {"err": "ok", "msg": _("转换成功"), "data": data}
 
 
 class DownloadHandler(BaseHandler):
