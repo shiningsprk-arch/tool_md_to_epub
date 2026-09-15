@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>md_to_epub</title>
+  <!--
+    视觉基调全部来自脚手架提供的 lib/theme.css（--mb-color-* 变量 + 基础组件 class，
+    深浅色靠 <body data-theme>）；下面的 <style> 只放本页特有的几行布局补充。
+  -->
+  <link rel="stylesheet" href="lib/theme.css" />
+  <style>
+    body { margin: 16px 24px 24px; }
+    h1 { font-size: 1.25em; margin: 0 0 16px; }
+    .field-label { display: block; margin: 14px 0 6px; font-size: 0.92em; }
+    .hint { margin: 4px 0 0; font-size: 0.82em; }
+    .hidden-input { display: none; }
+    .picker-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+    .convert-btn { width: 100%; justify-content: center; margin-top: 20px; padding: 10px 16px; }
+    .stats { display: flex; gap: 10px; margin: 10px 0; }
+    #result .mb-alert, #error.mb-alert { margin-bottom: 10px; }
+    #download-link { text-decoration: none; }
+    /* theme.css 给按钮/提示设了 display，会盖掉 [hidden] 的 UA 规则，这里补回优先级 */
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="mb-container">
+    <h1 data-i18n="title">Markdown to EPUB</h1>
+
+    <div class="mb-card">
+      <p class="mb-text-secondary" data-i18n="intro"></p>
+
+      <!-- 两个选择入口同一副样式（原生 file input 藏起来，用 .mb-btn--secondary 触发，见 theme.css 的 .mb-file-input 说明） -->
+      <div class="picker-row">
+        <button id="dir-btn" class="mb-btn mb-btn--secondary" type="button" data-i18n="dirBtn"></button>
+        <input id="dir-input" class="hidden-input" type="file" webkitdirectory directory multiple />
+        <span id="picked-dir" class="mb-text-secondary hint"></span>
+      </div>
+      <p class="mb-text-secondary hint" data-i18n="dirHint"></p>
+
+      <div class="picker-row">
+        <button id="file-btn" class="mb-btn mb-btn--secondary" type="button" data-i18n="fileLabel"></button>
+        <input id="file-input" class="hidden-input" type="file" multiple
+               accept=".md,.markdown,.mdown,.mkd,.zip" />
+        <span id="picked-files" class="mb-text-secondary hint"></span>
+      </div>
+
+      <label class="mb-field" style="margin-top: 14px">
+        <input id="ignore-images" type="checkbox" />
+        <span data-i18n="ignoreImages"></span>
+      </label>
+      <p class="mb-text-secondary hint" data-i18n="ignoreImagesHint"></p>
+
+      <div class="mb-row" style="margin-top: 14px">
+        <div class="mb-col">
+          <label class="field-label" for="title-input" data-i18n="titleLabel"></label>
+          <input id="title-input" class="mb-input" type="text" />
+        </div>
+        <div class="mb-col">
+          <label class="field-label" for="author-input" data-i18n="authorLabel"></label>
+          <input id="author-input" class="mb-input" type="text" />
+        </div>
+      </div>
+
+      <button id="convert-btn" class="mb-btn convert-btn" type="button" disabled>
+        <span id="spinner" class="mb-spinner" hidden></span>
+        <span id="convert-text" data-i18n="convertBtn"></span>
+      </button>
+      <div id="progress" class="mb-progress-linear mb-progress-linear--indeterminate" hidden>
+        <div class="mb-progress-linear__bar"></div>
+      </div>
+
+      <div id="error" class="mb-alert mb-alert--error" hidden style="margin-top: 14px"></div>
+
+      <div id="result" hidden style="margin-top: 18px">
+        <div class="mb-alert mb-alert--success" data-i18n="success"></div>
+        <div class="stats">
+          <span class="mb-chip"><span data-i18n="statChapters"></span>: <b id="stat-chapters">0</b></span>
+          <span class="mb-chip"><span data-i18n="statImages"></span>: <b id="stat-images">0</b></span>
+        </div>
+        <div id="warnings" class="mb-alert mb-alert--warning" hidden></div>
+        <a id="download-link" class="mb-btn" href="#" download></a>
+      </div>
+    </div>
+  </div>
+
+  <!-- bridge 由宿主提供（iframe 内 src 指向宿主 /static/）；lib/i18n.js 是脚手架自带的字串胶水 -->
+  <script src="/static/toolbox-bridge.js"></script>
+  <script src="lib/i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

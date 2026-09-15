@@ -1,0 +1,19 @@
+{
+  "tool_id": "md_to_epub",
+  "name": "Markdown转EPUB",
+  "description": "将 Markdown（支持同目录图片、目录或 zip 上传）转换为 EPUB3 电子书",
+  "revision": "1.0.0",
+  "author": "黏菌",
+  "publish_date": "2026-09-15",
+  "core_api_version": "1.3.0",
+  "entry_backend": "tool.MdToEpubTool",
+  "entry_frontend": "index.html",
+  "page": "md_to_epub",
+  "repo_url": "https://github.com/shiningsprk-arch/tool_md_to_epub",
+  "locales": ["zh", "en", "zh-TW"],
+  "default_locale": "zh",
+  "api_routes": [
+    { "path": "convert", "handler": "tool.ConvertHandler" },
+    { "path": "download", "handler": "tool.DownloadHandler" }
+  ]
+}

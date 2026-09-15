@@ -1,0 +1,18 @@
+# 打包产物（mytool build 输出）
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 本地调试 / 迁移参考（不入库）
+.porting/
+
+# OS / 编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
