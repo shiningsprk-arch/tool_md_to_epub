@@ -1,0 +1,6 @@
+# 打包产物里的文本文件保持 LF：仓库在 Windows 上 checkout 时若被转成 CRLF，
+# mytool build 会把 CRLF 版本打进 zip，和上游脚手架/源码的分隔符就不一致了。
+* text=auto eol=lf
+
+# 图标是二进制，别做换行/编码处理
+*.png binary
