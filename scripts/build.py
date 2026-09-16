@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
 """推荐的工具包构建入口：清理字节码 → 调 mytool build → 校验 zip 形状。
 
-为什么不用直接 `mytool build`：上游 src/build.js 的排除正则是
-``/(^|\\/)(__pycache__\\/|\\.pyc$|\\.DS_Store$)/``，只认正斜杠；而 zip 分支把
-adm-zip 的条目路径原样传进过滤器，Windows 上是反斜杠，于是 ``backend/__pycache__/*.pyc``
-会被**静默打进包**（7z 分支的 copyDirFiltered 做了 path.sep 归一化，反而没这个问题）。
-本脚本先把字节码清掉，再校验产物，避免带上几十 KB 无用产物、也让商店审核看不到脏东西。
+先清掉工作树里的 `__pycache__`/`*.pyc` 再打包，再对产物做形状校验：根目录必须有
+`manifest.json`、不得出现 `__pycache__`/`.pyc`/`.DS_Store`/越界顶层条目、必需文件齐全；
+不通过就非零退出。目的是让"包里混进杂物"这类问题在构建期就暴露，而不是等到安装时才怪。
 
 用法：python scripts/build.py [--keep-dist]
 """

@@ -59,11 +59,7 @@ python scripts/build.py      # 推荐：清理字节码 → mytool build → 校
 前端是原生 HTML/CSS/JS，没有构建步骤（`.toolbuilder.json` 的两项都是 `null`），打包就是把
 `frontend/` 原样放进 zip。
 
-**为什么推荐 `scripts/build.py` 而不是直接 `mytool build`**：上游 `src/build.js` 的排除正则
-`/(^|\/)(__pycache__\/|\.pyc$|\.DS_Store$)/` 只认正斜杠，而 zip 分支把 adm-zip 的条目路径原样
-传进过滤器——Windows 上是反斜杠，于是 `backend/__pycache__/*.pyc` 会被**静默打进包**（7z 分支
-做了 `path.sep` 归一化，反而没这个问题；实测 1.0.0 首次打包带进 4 个 `.pyc`、约 69 KB）。
-本脚本先清字节码再打包，并对产物做形状校验（根目录必须有 `manifest.json`、不得出现
+`scripts/build.py` 除清字节码外还会校验产物形状（根目录必须有 `manifest.json`、不得出现
 `__pycache__`/`.pyc`/`.DS_Store`/越界顶层条目、必需文件齐全），不通过就非零退出。
 
 手工打包（没有 Node 时）也可以，但 zip **根目录**必须是 `manifest.json` / `backend/` /
